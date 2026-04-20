@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TimeFlow</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f1f5f9;
+      overflow: hidden;
+    }
+
+    /* Beautiful Scrollbars */
+    .custom-scrollbar::-webkit-scrollbar {
+      height: 12px;
+      width: 12px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: rgba(15, 23, 42, 0.4);
+      border-radius: 8px;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(148, 163, 184, 0.3);
+      border-radius: 8px;
+      border: 3px solid transparent;
+      background-clip: padding-box;
+    }
+
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background-color: rgba(148, 163, 184, 0.6);
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    .glass-effect {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(16px);
+    }
+  </style>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7' },
+            accent: { 400: '#c084fc', 500: '#a855f7' }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+
+<body class="antialiased min-h-screen text-slate-100 selection:bg-brand-500 selection:text-white">
+  <div id="root" class="h-screen w-screen"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef, useCallback } = React;
+
+    // --- Utility Functions ---
+    const parseDate = (dateStr) => new Date(dateStr + "T00:00:00");
+    const formatDate = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+    const SENTENCES = [
+      "天空没有极限，我的星空没有极限 ——《天空没有极限》",
+      "我已无所畏惧，让未来也畏惧我 ——《句号》",
+      "有没有一种爱，能跨越时间与距离 ——《光年之外》",
+      "全都是泡沫，只一刹的花火 ——《泡沫》",
+      "风雨中逆行着，做自己唯一的英雄 ——《孤独》",
+      "不怕前路漫长，至少我们在发光 ——《萤火》",
+      "用尽全力，直到再也没有遗憾 ——《新的心跳》",
+      "我是我的护城河，谁也别想改变我 ——《岩石里的花》",
+      "时光的列车，呼啸着带走错过的 ——《画》",
+      "逆风飞行，也要骄傲地翱翔 ——《骄傲的少年》",
+      "黑夜之所以黑，是为了给你满天繁星 ——《星光》",
+      "把遗憾揉碎，散落进昨夜的梦里 ——《回忆的沙漏》",
+      "就算世界与我为敌，我也绝不委屈自己 ——《摩天动物园》",
+      "只要有心跳，就有未知的期待 ——《新的心跳》",
+      "不要放弃，未来有无数种可能 ——《启示录》"
+    ];
+
+    function useLocalStorage(key, initialValue) {
+      const [storedValue, setStoredValue] = useState(() => {
+        try {
+          const item = window.localStorage.getItem(key);
+          return item ? JSON.parse(item) : initialValue;
+        } catch (error) {
+          console.warn(error);
+          return initialValue;
+        }
+      });
+
+      const setValue = (value) => {
+        try {
+          const valueToStore = value instanceof Function ? value(storedValue) : value;
+          setStoredValue(valueToStore);
+          window.localStorage.setItem(key, JSON.stringify(valueToStore));
+        } catch (error) {
+          console.warn(error);
+        }
+      };
+      return [storedValue, setValue];
+    }
+
+    // --- Components ---
+    const EditableText = ({ value, onChange, className, as: Component = "span" }) => {
+      const [isEditing, setIsEditing] = useState(false);
+      const [text, setText] = useState(value);
+      const inputRef = useRef(null);
+
+      useEffect(() => { setText(value); }, [value]);
+      useEffect(() => { if (isEditing && inputRef.current) inputRef.current.focus(); }, [isEditing]);
+
+      const handleBlur = () => {
+        setIsEditing(false);
+        if (text.trim() !== value) onChange(text || "空文本");
+      };
+
+      if (isEditing) {
+        return (
+          <input
+            ref={inputRef}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={(e) => e.key === 'Enter' && handleBlur()}
+            className={`bg-slate-800 border-b border-brand-500 outline-none text-slate-100 ${className}`}
+            style={{ width: `${Math.max(text.length * 1.5, 4)}ch` }}
+          />
+        );
+      }
+      return (
+        <Component onClick={() => setIsEditing(true)} className={`cursor-pointer hover:bg-slate-700/80 rounded px-1 -mx-1 transition-colors ${className}`} title="点击修改">{text}</Component>
+      );
+    };
+
+    const DateEditor = ({ value, onChange, className }) => {
+      const [isEditing, setIsEditing] = useState(false);
+      if (isEditing) {
+        return (
+          <input
+            type="date"
+            value={value}
+            onChange={(e) => {
+              if (e.target.value) {
+                if (new Date(e.target.value).toString() !== "Invalid Date") {
+                  onChange(e.target.value);
+                }
+              }
+              setIsEditing(false);
+            }}
+            onBlur={() => setIsEditing(false)}
+            autoFocus
+            className={`bg-slate-800 text-xs px-1 py-0.5 rounded outline-none text-brand-400 border border-brand-500/50 [color-scheme:dark] [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-80 hover:[&::-webkit-calendar-picker-indicator]:opacity-100 transition-all ${className}`}
+          />
+        );
+      }
+      return (
+        <span onClick={() => setIsEditing(true)} className={`cursor-pointer hover:bg-slate-700/80 rounded px-1 -mx-1 transition-colors ${className}`} title="修改日期">{value}</span>
+      );
+    };
+
+    const RealTimeClock = () => {
+      const [time, setTime] = useState(new Date());
+      useEffect(() => {
+        const timer = setInterval(() => setTime(new Date()), 1000);
+        return () => clearInterval(timer);
+      }, []);
+      return <span className="font-mono text-emerald-400 font-bold tracking-wider text-sm">{time.getHours().toString().padStart(2, '0')}:{time.getMinutes().toString().padStart(2, '0')}:{time.getSeconds().toString().padStart(2, '0')}</span>;
+    };
+
+    const PRESET_BG_COLORS = [
+      { id: 'slate', val: 'bg-slate-900', label: '深空蓝' },
+      { id: 'zinc', val: 'bg-zinc-900', label: '极简黑' },
+      { id: 'blue', val: 'bg-blue-950', label: '海王星' },
+      { id: 'grad1', val: 'bg-gradient-to-br from-slate-900 to-emerald-900', label: '翡翠星云' },
+      { id: 'grad2', val: 'bg-gradient-to-tr from-slate-900 via-purple-900 to-slate-900', label: '紫晶幻境' },
+    ];
+
+    const THEMES = {
+      'bg-blue-500': { border: 'border-blue-500', bg: 'bg-blue-900/40', fill: 'bg-blue-500/80', text: 'text-blue-200', accent: 'accent-blue-500' },
+      'bg-purple-500': { border: 'border-purple-500', bg: 'bg-purple-900/40', fill: 'bg-purple-500/80', text: 'text-purple-200', accent: 'accent-purple-500' },
+      'bg-emerald-500': { border: 'border-emerald-500', bg: 'bg-emerald-900/40', fill: 'bg-emerald-500/80', text: 'text-emerald-200', accent: 'accent-emerald-500' },
+      'bg-orange-500': { border: 'border-orange-500', bg: 'bg-orange-900/40', fill: 'bg-orange-500/80', text: 'text-orange-200', accent: 'accent-orange-500' },
+      'bg-pink-500': { border: 'border-pink-500', bg: 'bg-pink-900/40', fill: 'bg-pink-500/80', text: 'text-pink-200', accent: 'accent-pink-500' },
+      'bg-cyan-500': { border: 'border-cyan-500', bg: 'bg-cyan-900/40', fill: 'bg-cyan-500/80', text: 'text-cyan-200', accent: 'accent-cyan-500' },
+    };
+
+    const App = () => {
+      // States
+      const [title, setTitle] = useLocalStorage("gantt-title", "TimeFlow");
+      const [tasks, setTasks] = useLocalStorage("gantt-tasks", []);
+      const [showDetails, setShowDetails] = useLocalStorage("gantt-details", false);
+      const [bgConfig, setBgConfig] = useLocalStorage("gantt-bg", { type: 'color', val: 'bg-slate-900' });
+      const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
+
+      const [showBgMenu, setShowBgMenu] = useState(false);
+      const [customImgUrl, setCustomImgUrl] = useState("");
+
+      const [sentenceIdx, setSentenceIdx] = useState(0);
+
+      useEffect(() => {
+        const timer = setInterval(() => setSentenceIdx(i => (i + 1) % SENTENCES.length), 4000);
+        return () => clearInterval(timer);
+      }, []);
+
+      const [today, setToday] = useState(() => new Date());
+      const [pixelsPerDay, setPixelsPerDay] = useLocalStorage("gantt-zoom", 35);
+
+      useEffect(() => {
+        const timer = setInterval(() => setToday(new Date()), 60000);
+        return () => clearInterval(timer);
+      }, []);
+
+      const scrollContainerRef = useRef(null);
+      const timelineBodyRef = useRef(null);
+      const hasInitialScrolled = useRef(false);
+
+      const [scrubberPx, setScrubberPx] = useState(null);
+      const [scrubberYPx, setScrubberYPx] = useState(null);
+      const [isDraggingScrubber, setIsDraggingScrubber] = useState(false);
+
+      const fitToScreen = () => {
+        const tasksInYear = tasks.filter(t => parseDate(t.endDate) >= dateStats.minDate && parseDate(t.startDate) <= dateStats.maxDate);
+        if (!scrollContainerRef.current) return;
+
+        let earliest;
+        let newZoom = 35;
+
+        if (tasksInYear.length > 0) {
+          earliest = Math.min(...tasksInYear.map(t => parseDate(t.startDate).getTime()));
+          let latest = Math.max(...tasksInYear.map(t => parseDate(t.endDate).getTime()));
+          earliest = Math.max(earliest, dateStats.minDate.getTime());
+          latest = Math.min(latest, dateStats.maxDate.getTime());
+
+          const spanDays = (latest - earliest) / MS_PER_DAY;
+          if (spanDays > 0) {
+            const availableWidth = scrollContainerRef.current.clientWidth - 300;
+            newZoom = Math.max(3, Math.min(100, availableWidth / spanDays));
+          }
+        } else {
+          earliest = dateStats.minDate.getTime();
+        }
+
+        setPixelsPerDay(newZoom);
+
+        // Auto-scroll back to early elements
+        setTimeout(() => {
+          if (scrollContainerRef.current) {
+            const left = ((earliest - dateStats.minDate.getTime()) / MS_PER_DAY) * newZoom;
+            scrollContainerRef.current.scrollTo({ left: Math.max(0, left - 50), behavior: 'smooth' });
+          }
+        }, 50);
+      };
+
+      useEffect(() => {
+        hasInitialScrolled.current = false;
+      }, [viewYear]);
+
+      // Boundaries Math (Fixed to View Year)
+      const dateStats = useMemo(() => {
+        const minDate = new Date(viewYear, 0, 1);
+        const maxDate = new Date(viewYear, 11, 31, 23, 59, 59, 999);
+        const totalDurationDays = Math.ceil((maxDate.getTime() - minDate.getTime()) / MS_PER_DAY);
+
+        return {
+          minDate,
+          maxDate,
+          totalDurationDays,
+        };
+      }, [viewYear]);
+
+      const months = useMemo(() => {
+        const result = [];
+        for (let m = 0; m < 12; m++) {
+          const monthStart = new Date(viewYear, m, 1);
+          const monthEnd = new Date(viewYear, m + 1, 0, 23, 59, 59, 999);
+          const name = monthStart.toLocaleString('zh-CN', { month: 'long', year: 'numeric' });
+          const daysInSpan = Math.ceil((monthEnd.getTime() - monthStart.getTime()) / MS_PER_DAY);
+          result.push({
+            name,
+            days: daysInSpan,
+            widthPx: daysInSpan * pixelsPerDay
+          });
+        }
+        return result;
+      }, [viewYear, pixelsPerDay]);
+
+      const todayOffsetPx = useMemo(() => {
+        const time = today.getTime();
+        if (time < dateStats.minDate.getTime() || time > dateStats.maxDate.getTime()) return null;
+        return ((time - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay;
+      }, [dateStats, today, pixelsPerDay]);
+
+      // Scrubber System Effects & Memos
+      useEffect(() => {
+        if (todayOffsetPx !== null && scrubberPx === null) {
+          setScrubberPx(todayOffsetPx);
+        }
+      }, [todayOffsetPx, scrubberPx]);
+
+      const handleScrubberPointerDown = (e) => {
+        e.preventDefault();
+        setIsDraggingScrubber(true);
+        if (timelineBodyRef.current) {
+          const rect = timelineBodyRef.current.getBoundingClientRect();
+          setScrubberYPx(e.clientY - rect.top);
+        }
+      };
+
+      useEffect(() => {
+        const handlePointerMove = (e) => {
+          if (!isDraggingScrubber || !timelineBodyRef.current) return;
+          const rect = timelineBodyRef.current.getBoundingClientRect();
+          let newX = e.clientX - rect.left;
+          let newY = e.clientY - rect.top;
+          if (newX < 0) newX = 0;
+          setScrubberPx(newX);
+          setScrubberYPx(newY);
+        };
+        const handlePointerUp = () => setIsDraggingScrubber(false);
+
+        if (isDraggingScrubber) {
+          window.addEventListener('pointermove', handlePointerMove);
+          window.addEventListener('pointerup', handlePointerUp);
+          document.body.style.userSelect = 'none';
+        } else {
+          document.body.style.userSelect = '';
+        }
+        return () => {
+          window.removeEventListener('pointermove', handlePointerMove);
+          window.removeEventListener('pointerup', handlePointerUp);
+        }
+      }, [isDraggingScrubber]);
+
+      const activeScrubberTasks = useMemo(() => {
+        if (scrubberPx === null) return [];
+        const msOffset = (scrubberPx / pixelsPerDay) * MS_PER_DAY;
+        const scrubberTime = dateStats.minDate.getTime() + msOffset;
+        return tasks.filter(t => {
+          const s = parseDate(t.startDate).getTime();
+          const e = parseDate(t.endDate).getTime();
+          return scrubberTime >= s && scrubberTime <= e;
+        });
+      }, [scrubberPx, tasks, dateStats.minDate, pixelsPerDay]);
+
+      const topPriorityTask = useMemo(() => {
+        return activeScrubberTasks.filter(t => !t.isCompleted)[0] || activeScrubberTasks[0];
+      }, [activeScrubberTasks]);
+
+      const scrubberTimeStr = useMemo(() => {
+        if (scrubberPx === null) return "";
+        const time = dateStats.minDate.getTime() + (scrubberPx / pixelsPerDay) * MS_PER_DAY;
+        const d = new Date(time);
+        return `${d.getMonth() + 1}/${d.getDate()}`;
+      }, [scrubberPx, pixelsPerDay, dateStats.minDate]);
+
+      // Auto-Scroll Logic
+      useEffect(() => {
+        if (!scrollContainerRef.current || hasInitialScrolled.current) return;
+
+        const container = scrollContainerRef.current;
+        const autoScroll = () => {
+          const tasksInYear = tasks.filter(t => parseDate(t.endDate) >= dateStats.minDate && parseDate(t.startDate) <= dateStats.maxDate);
+          if (tasksInYear.length > 0) {
+            let earliest = Math.min(...tasksInYear.map(t => parseDate(t.startDate).getTime()));
+            earliest = Math.max(earliest, dateStats.minDate.getTime());
+            const left = ((earliest - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay;
+            container.scrollLeft = Math.max(0, left - 20);
+          } else if (todayOffsetPx !== null) {
+            container.scrollLeft = Math.max(0, todayOffsetPx - container.clientWidth / 3);
+          } else {
+            container.scrollLeft = 0;
+          }
+        };
+
+        const timer = setTimeout(() => {
+          autoScroll();
+          hasInitialScrolled.current = true;
+        }, 150);
+
+        return () => clearTimeout(timer);
+      }, [viewYear, todayOffsetPx, dateStats.minDate, tasks]);
+
+      // Handlers
+      const handleUpdateTask = (id, updates) => {
+        // Enforce valid dates
+        if (updates.startDate || updates.endDate) {
+          const t = tasks.find(x => x.id === id);
+          if (t) {
+            const startStr = updates.startDate || t.startDate;
+            const endStr = updates.endDate || t.endDate;
+            if (parseDate(startStr) > parseDate(endStr)) {
+              alert("开始日期不能晚于结束日期");
+              return;
+            }
+          }
+        }
+        setTasks(tasks.map(t => t.id === id ? { ...t, ...updates } : t));
+      };
+
+      const handleAddTask = () => {
+        const d1 = new Date();
+        const d2 = new Date(d1.getTime() + 7 * MS_PER_DAY);
+
+        const icons = ['✨', '🚀', '🎯', '💡', '📅', '📝', '🔥', '📌'];
+        const colors = ['bg-blue-500', 'bg-purple-500', 'bg-emerald-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500'];
+
+        setTasks([...tasks, {
+          id: Date.now(),
+          title: "新建日程",
+          icon: icons[tasks.length % icons.length],
+          color: colors[tasks.length % colors.length],
+          startDate: formatDate(d1),
+          endDate: formatDate(d2),
+          milestones: []
+        }]);
+      };
+
+      const handleDeleteTask = (id) => {
+        if (confirm("删除这个事件吗？")) setTasks(tasks.filter(t => t.id !== id));
+      };
+
+      const handleAddMilestone = (taskId) => {
+        const t = tasks.find(x => x.id === taskId);
+        const newMs = [...(t.milestones || []), { date: t.endDate, label: "新节点" }];
+        handleUpdateTask(taskId, { milestones: newMs });
+      };
+      const handleUpdateMilestone = (taskId, idx, updates) => {
+        setTasks(tasks.map(t => {
+          if (t.id !== taskId) return t;
+          const newMs = [...t.milestones];
+          newMs[idx] = { ...newMs[idx], ...updates };
+          return { ...t, milestones: newMs };
+        }));
+      };
+      const handleRemoveMilestone = (taskId, idx) => {
+        setTasks(tasks.map(t => {
+          if (t.id !== taskId) return t;
+          const newMs = t.milestones.filter((_, i) => i !== idx);
+          return { ...t, milestones: newMs };
+        }));
+      };
+
+      // Inline Custom Styles
+      const mainContainerStyle = bgConfig.type === 'image'
+        ? { backgroundImage: `url('${bgConfig.val}')`, backgroundSize: 'cover', backgroundPosition: 'center' }
+        : {};
+      const baseClasses = bgConfig.type === 'color' ? bgConfig.val : 'bg-slate-900';
+
+      return (
+        <div className={`w-full h-full relative transition-colors duration-500 ${baseClasses}`} style={mainContainerStyle}>
+          {bgConfig.type === 'image' && <div className="absolute inset-0 bg-slate-900/20 transition-all pointer-events-none"></div>}
+
+          <div className="flex flex-col h-full p-4 lg:p-6 pb-2 gap-4 relative z-10 w-full max-w-full">
+
+            {/* Header */}
+            <header className="flex justify-between items-end pb-3 border-b border-white/10 shrink-0">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-end gap-5">
+                  <EditableText
+                    as="h1"
+                    value={title}
+                    onChange={setTitle}
+                    className="text-4xl lg:text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-brand-400 to-white py-1 block w-max tracking-tight"
+                  />
+                  <div className="text-[13px] font-medium text-slate-400 italic animate-pulse pb-2 opacity-80 hidden sm:block tracking-wide">
+                    {SENTENCES[sentenceIdx]}
+                  </div>
+                </div>
+                <p className="text-slate-300/80 mt-1 text-xs ml-1 flex items-center gap-1.5 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 border border-slate-900 shadow-[0_0_8px_#34d399]"></span>
+                  修改已在本地保存
+                </p>
+              </div>
+
+              <div className="flex gap-4 flex-wrap items-center">
+                {/* Active Scrubber Insight */}
+                <div className="hidden lg:flex items-center gap-4 bg-slate-900 border border-slate-700/50 py-1.5 px-3 rounded-lg mr-4 shadow-inner">
+                  <div className="flex flex-col items-center pr-4 border-r border-slate-700">
+                    <span className="text-[9px] text-slate-500 font-bold uppercase tracking-widest pl-1">今日状态: {scrubberTimeStr}</span>
+                    <span className="text-2xl font-black text-brand-400 leading-none mt-0.5">{activeScrubberTasks.length}<span className="text-[11px] font-medium text-slate-500 ml-1">正在进行</span></span>
+                  </div>
+                  <div className="flex flex-col max-w-[200px] overflow-hidden pr-2">
+                    <span className="text-[9px] text-emerald-400/80 font-bold uppercase tracking-widest pt-0.5">聚焦 (FOCUS)</span>
+                    <span className="truncate text-[13px] font-bold text-white mt-1">
+                      {topPriorityTask ? topPriorityTask.name : "暂无待办事项"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Bg Picker */}
+                <div className="relative">
+                  <button onClick={() => setShowBgMenu(!showBgMenu)} className="text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-white/10 flex items-center gap-2">
+                    <span>🎨</span> 调整背景
+                  </button>
+                  {showBgMenu && (
+                    <div className="absolute top-full right-0 mt-2 w-64 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl p-4 z-50">
+                      <div className="text-xs font-semibold text-slate-400 mb-2">预设主题</div>
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {PRESET_BG_COLORS.map(c => (
+                          <div
+                            key={c.id}
+                            title={c.label}
+                            onClick={() => { setBgConfig({ type: 'color', val: c.val }); setShowBgMenu(false); }}
+                            className={`w-6 h-6 rounded-full cursor-pointer shadow-inner border border-white/20 hover:scale-110 transition-transform ${c.val}`}
+                          ></div>
+                        ))}
+                      </div>
+                      <div className="text-xs font-semibold text-slate-400 mb-2">外链图 URL</div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="https://..."
+                          value={customImgUrl}
+                          onChange={(e) => setCustomImgUrl(e.target.value)}
+                          className="flex-1 bg-slate-900 text-xs px-2 py-1.5 rounded border border-slate-700 text-slate-200 outline-brand-500"
+                        />
+                        <button
+                          onClick={() => { if (customImgUrl) { setBgConfig({ type: 'image', val: customImgUrl }); setShowBgMenu(false); } }}
+                          className="bg-brand-500 hover:bg-brand-400 text-white text-xs px-2 py-1.5 rounded"
+                        >应用</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex text-right bg-slate-950/40 p-2 lg:px-4 rounded-lg border border-white/10 backdrop-blur-md">
+                  <div className="px-3 border-r border-white/10">
+                    <div className="text-slate-400/80 text-[10px] uppercase tracking-widest mb-0.5 font-bold">进行中任务</div>
+                    <div className="text-brand-300 font-bold text-sm flex items-center gap-2 justify-end">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse"></span>
+                      {tasks.filter(t => parseDate(t.startDate) <= today && parseDate(t.endDate) >= today).length} 个
+                    </div>
+                  </div>
+                  <div className="px-3">
+                    <div className="text-slate-400/80 text-[10px] uppercase tracking-widest mb-0.5 font-bold">当前日期</div>
+                    <div className="text-slate-100 font-bold text-sm">
+                      {formatDate(today)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            {/* Sub Tools Area */}
+            <div className="flex justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <button onClick={handleAddTask} className="group flex items-center gap-2 bg-slate-800 hover:bg-brand-500 text-slate-200 hover:text-white px-4 py-2 rounded-lg font-medium shadow-lg hover:shadow-brand-500/30 transition-all border border-slate-700">
+                  <svg className="w-4 h-4 transition-transform group-hover:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
+                  <span>添加新活动</span>
+                </button>
+
+                {/* Year Selector */}
+                <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg shadow-lg overflow-hidden h-[42px]">
+                  <button onClick={() => setViewYear(y => y - 1)} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="上一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                  <div className="flex items-center justify-center px-1">
+                    <span className="text-brand-400 font-bold whitespace-nowrap">{viewYear} 年</span>
+                  </div>
+                  <button onClick={() => setViewYear(y => y + 1)} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="下一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                </div>
+
+                {/* Clock */}
+                <div className="flex items-center justify-center bg-slate-800 border border-slate-700 rounded-lg shadow-lg h-[42px] px-4 font-mono">
+                  <RealTimeClock />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 bg-slate-950/80 rounded-lg p-1.5 border border-indigo-500/30 shadow-[0_0_15px_rgba(0,0,0,0.5)]">
+                <span className="text-[11px] font-bold text-indigo-400 uppercase ml-2 tracking-widest">Zoom</span>
+                <input type="range" min="3" max="100" value={pixelsPerDay} onChange={e => setPixelsPerDay(Number(e.target.value))} className="w-24 accent-[#ff003c] cursor-pointer" />
+                <button onClick={fitToScreen} className="text-[10px] bg-indigo-500/20 hover:bg-[#ff003c] hover:text-white text-indigo-300 px-3 py-1 rounded shadow-md border border-indigo-500/40 transition-all font-bold tracking-widest uppercase">Fit</button>
+              </div>
+
+              <label className="flex items-center cursor-pointer gap-3 bg-slate-950/80 px-3 py-1.5 rounded-lg border border-indigo-500/30">
+                <span className="text-sm font-bold text-indigo-300">详细指标</span>
+                <div className="relative">
+                  <input type="checkbox" className="sr-only" checked={showDetails} onChange={(e) => setShowDetails(e.target.checked)} />
+                  <div className={`block w-10 h-5 rounded-full transition-colors shadow-inner ${showDetails ? 'bg-[#ff003c]' : 'bg-slate-800 border border-slate-700'}`}></div>
+                  <div className={`absolute left-1 top-1 bg-white w-3 h-3 rounded-full transition-transform ${showDetails ? 'translate-x-5 shadow-[0_0_10px_white]' : ''}`}></div>
+                </div>
+              </label>
+            </div>
+
+            {/* Gantt Chart Area */}
+            {/* The trick to sync scrolling: One large container with overflow-auto. added min-h-0 and mt-1 */}
+            <main ref={scrollContainerRef} className="flex-1 min-h-0 mt-1 rounded-xl border border-indigo-500/20 shadow-[0_20px_50px_rgba(0,0,0,0.8),inset_0_0_30px_rgba(0,0,0,0.5)] overflow-auto custom-scrollbar relative bg-slate-950/20 backdrop-blur-sm">
+
+              {/* Entire virtual table width */}
+              <div className="min-w-max min-h-full flex flex-col relative pb-32">
+
+                {/* Timeline Header (Sticky Top) */}
+                <div className="flex sticky top-0 z-50 bg-slate-950/40 backdrop-blur-md border-b border-indigo-500/20 shadow-[0_10px_20px_rgba(0,0,0,0.6)]">
+                  {/* Top-Left Corner intersection */}
+                  <div className="w-[20rem] lg:w-[24rem] shrink-0 border-r border-indigo-500/20 p-4 sticky left-0 z-[60] bg-slate-950/50 backdrop-blur-md font-bold text-indigo-400 flex items-center shadow-[4px_0_15px_rgba(0,0,0,0.4)] tracking-wide uppercase">
+                    <span className="bg-indigo-900/40 p-1.5 rounded-md mr-3 text-xs text-indigo-300 border border-indigo-500/40 shadow-[0_0_10px_rgba(99,102,241,0.3)]">📌</span>
+                    CYBER-PLANNER
+                  </div>
+                  {/* Top-Right Months & Days */}
+                  <div className="flex">
+                    {months.map((m, i) => (
+                      <div
+                        key={i}
+                        className="border-l border-indigo-500/30 first:border-l-0 flex flex-col relative"
+                        style={{ width: m.widthPx + 'px' }}
+                      >
+                        <div className="text-center text-[13px] text-indigo-300 py-1.5 border-b border-indigo-500/30 font-bold tracking-wider overflow-hidden truncate bg-indigo-900/20">
+                          {m.name}
+                        </div>
+                        <div className="flex h-6 w-full relative">
+                          {Array.from({ length: m.days }).map((_, d) => (
+                            <div
+                              key={d}
+                              className="absolute top-0 bottom-0 border-r border-indigo-500/20 flex flex-col items-center justify-end pb-0.5 text-[10px] text-indigo-400/80 font-mono select-none overflow-hidden"
+                              style={{ left: `${(d / m.days) * 100}%`, width: `${(1 / m.days) * 100}%` }}
+                            >
+                              <span className={`${pixelsPerDay < 15 && d % 5 !== 0 && d !== 0 ? 'opacity-0' : 'opacity-100'}`}>{d + 1}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Timeline Body Container */}
+                <div className="flex flex-col flex-1 relative pt-[72px]">
+
+                  {/* Background Layer: Grids and Today Line (z-0 ensures Tasks Loop overlays!) */}
+                  <div className="absolute top-0 bottom-0 left-[20rem] lg:left-[24rem] right-0 z-0 pointer-events-none overflow-visible">
+                    {/* Grid */}
+                    <div className="absolute inset-0" style={{ backgroundImage: `repeating-linear-gradient(to right, transparent, transparent ${pixelsPerDay - 1}px, rgba(99,102,241,0.05) ${pixelsPerDay - 1}px, rgba(99,102,241,0.05) ${pixelsPerDay}px)` }}></div>
+
+                    {/* Today Highlight Line */}
+                    {todayOffsetPx !== null && (
+                      <div
+                        className="absolute top-0 bottom-0 w-[2px] bg-[#ff003c] shadow-[0_0_20px_#ff003c,0_0_5px_#ff003c] transition-all duration-1000 ease-linear"
+                        style={{ left: `${todayOffsetPx}px` }}
+                      >
+                        <div className="absolute top-[8px] -translate-x-1/2 bg-black/95 border border-[#ff003c]/90 shadow-[0_0_20px_rgba(255,0,60,0.8),inset_0_0_10px_rgba(255,0,60,0.4)] text-[#ff003c] text-[14px] font-bold px-4 py-1.5 rounded-full z-50 whitespace-nowrap backdrop-blur-xl uppercase tracking-wider cursor-default">
+                          {today.getMonth() + 1}月{today.getDate()}日 {today.getHours().toString().padStart(2, '0')}:{today.getMinutes().toString().padStart(2, '0')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Empty State */}
+                  {tasks.length === 0 && (
+                    <div className="w-full flex justify-center py-24 text-slate-400 z-10 sticky left-0">
+                      <div className="text-center">
+                        <div className="text-4xl mb-4">📭</div>
+                        <p>当前没有活动。点击上方按钮添加！</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tasks Loop */}
+                  <div className="flex flex-col w-full relative">
+                    {useMemo(() => [...tasks].sort((a, b) => (a.isCompleted === b.isCompleted) ? 0 : (a.isCompleted ? 1 : -1)), [tasks]).map(task => {
+                      const sDate = parseDate(task.startDate);
+                      const eDate = parseDate(task.endDate);
+
+                      const isVisible = eDate >= dateStats.minDate && sDate <= dateStats.maxDate;
+                      const visualStart = new Date(Math.max(sDate.getTime(), dateStats.minDate.getTime()));
+                      const visualEnd = new Date(Math.min(eDate.getTime(), dateStats.maxDate.getTime()));
+
+                      const leftPx = ((visualStart.getTime() - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay;
+                      let widthPx = ((visualEnd.getTime() - visualStart.getTime()) / MS_PER_DAY) * pixelsPerDay;
+                      if (widthPx < 20 && isVisible) widthPx = 20;
+
+                      const tColor = THEMES[task.color] || THEMES['bg-blue-500'];
+
+                      return (
+                        <div key={task.id} className={`flex group transition-colors border-b border-indigo-500/10 last:border-0 relative min-h-[58px] ${task.isCompleted ? 'bg-slate-900/50' : 'hover:bg-indigo-500/5'}`}>
+                          {/* Sticky Y-Axis Item */}
+                          <div className={`w-[20rem] lg:w-[24rem] shrink-0 border-r border-indigo-500/20 p-2 lg:p-3 flex items-center gap-3 sticky left-0 z-40 transition-colors shadow-[4px_0_15px_rgba(0,0,0,0.1)] backdrop-blur-md ${task.isCompleted ? 'bg-slate-950/40 grayscale opacity-80' : 'bg-slate-950/30 group-hover:bg-indigo-950/40'}`}>
+                            {/* Delete Button */}
+                            <button
+                              onClick={() => handleDeleteTask(task.id)}
+                              className="absolute left-1 top-1/2 -translate-y-1/2 text-rose-500 hover:text-rose-400 hover:scale-110 opacity-0 group-hover:opacity-100 transition-all p-1"
+                              title="删除"
+                            >
+                              <svg className="w-5 h-5 drop-shadow-[0_0_5px_rgba(244,63,94,0.8)]" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" /></svg>
+                            </button>
+
+                            <button
+                              onClick={() => handleUpdateTask(task.id, { isCompleted: !task.isCompleted })}
+                              className={`w-6 h-6 rounded-md border flex items-center justify-center transition-all ml-5 shrink-0 z-40 cursor-pointer ${task.isCompleted ? 'bg-emerald-500 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]' : 'bg-slate-900 border-indigo-500/50 hover:border-[#ff003c] hover:shadow-[0_0_10px_rgba(255,0,60,0.5)]'}`}
+                              title={task.isCompleted ? "取消完成" : "标记完成"}
+                            >
+                              {task.isCompleted && <svg className="w-4 h-4 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                            </button>
+
+                            <div className={`text-xl lg:text-2xl w-10 h-10 rounded-xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform shrink-0 ${task.isCompleted ? 'bg-slate-800' : 'bg-indigo-950 border border-indigo-500/30'}`}>
+                              {task.icon}
+                            </div>
+                            <div className="flex flex-col flex-1 min-w-0 pr-1">
+                              <EditableText
+                                value={task.title}
+                                onChange={(newVal) => handleUpdateTask(task.id, { title: newVal })}
+                                className={`font-bold text-[15px] truncate block mb-1 ${task.isCompleted ? 'text-slate-500 line-through' : 'text-indigo-100 drop-shadow-[0_0_5px_rgba(199,210,254,0.5)]'}`}
+                              />
+                              {showDetails && (
+                                <div className="flex flex-col gap-1 w-full shrink-0 mt-1">
+                                  <div className="flex items-center text-xs text-slate-400 gap-1 font-mono shrink-0 flex-wrap">
+                                    <DateEditor value={task.startDate} onChange={(val) => handleUpdateTask(task.id, { startDate: val })} />
+                                    <span>~</span>
+                                    <DateEditor value={task.endDate} onChange={(val) => handleUpdateTask(task.id, { endDate: val })} />
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1 bg-slate-800/40 p-1.5 rounded-[8px] border border-slate-700/50 shadow-inner">
+                                    <span className="text-[11px] font-bold text-slate-400 shrink-0 tracking-wide">进度</span>
+                                    <input
+                                      type="range"
+                                      min="0" max="100"
+                                      value={task.progress || 0}
+                                      onChange={(e) => handleUpdateTask(task.id, { progress: Number(e.target.value) })}
+                                      className={`flex-1 h-2 bg-slate-900 rounded-full appearance-none outline-none cursor-default ${tColor.accent} shadow-inner drop-shadow-sm`}
+                                    />
+                                    <span className="text-[11px] font-mono font-bold text-slate-300 w-8 text-right shrink-0">{task.progress || 0}%</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Gantt Bar Area */}
+                          <div className="relative flex-1 py-4 flex items-center">
+                            {/* The Bar */}
+                            {isVisible && (
+                              <div
+                                className={`absolute top-1/2 -translate-y-1/2 h-[50px] rounded-lg border-2 ${task.isCompleted ? 'border-slate-700/50 grayscale opacity-40' : tColor.border} outline-none transition-all group/bar hover:brightness-110 cursor-pointer shadow-[0_0_15px_rgba(0,0,0,0.5)] z-20`}
+                                style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                              >
+                                {/* Background and fill container (handles the internal clipping) */}
+                                <div className={`absolute inset-0 rounded-[10px] overflow-hidden ${tColor.bg}`}>
+                                  <div className={`absolute top-0 bottom-0 left-0 ${tColor.fill} transition-all duration-300 pointer-events-none animate-[pulse_2.5s_cubic-bezier(0.4,0,0.6,1)_infinite]`} style={{ width: `${task.progress || 0}%` }}></div>
+                                </div>
+
+                                {/* Text layer with sticky effect */}
+                                <div className="absolute inset-0 flex items-center pointer-events-none overflow-hidden rounded-[10px]">
+                                  <div className="sticky left-0 px-3 z-10 flex items-center w-full max-w-full">
+                                    <span className={`text-[13px] font-bold ${tColor.text} truncate drop-shadow opacity-90`}>{task.title}</span>
+                                    {showDetails && task.progress > 0 && typeof task.progress === 'number' && (
+                                      <span className={`text-[10px] ml-2 font-mono ${tColor.text} opacity-70`}>{task.progress}%</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Milestones */}
+                                {task.milestones && task.milestones.map((ms, i) => {
+                                  const mDate = parseDate(ms.date);
+                                  if (mDate < dateStats.minDate || mDate > dateStats.maxDate) return null; // hide milestone out of view
+
+                                  let nodeLeftPx = 0;
+                                  if (visualEnd.getTime() !== visualStart.getTime()) {
+                                    nodeLeftPx = ((mDate.getTime() - visualStart.getTime()) / MS_PER_DAY) * pixelsPerDay;
+                                  }
+                                  nodeLeftPx = Math.max(0, Math.min(nodeLeftPx, widthPx));
+
+                                  return (
+                                    <div
+                                      key={i}
+                                      className={`absolute top-1/2 -translate-y-1/2 w-4 h-4 ${tColor.fill} rounded-full border-2 ${tColor.border} shadow-md transform -translate-x-1/2 transition-all z-30 group/ms cursor-pointer`}
+                                      style={{ left: `${nodeLeftPx}px` }}
+                                      onClick={(e) => { e.stopPropagation(); }}
+                                    >
+                                      {/* Node Info Popover */}
+                                      <div className="absolute bottom-[160%] left-1/2 -translate-x-1/2 hidden group-hover/ms:flex flex-col items-center w-max bg-slate-800 border border-slate-600 text-slate-200 text-xs p-2.5 rounded-lg shadow-2xl cursor-default pointer-events-auto z-50">
+
+                                        <div className="flex items-center justify-between gap-3 w-full border-b border-white/10 pb-1 mb-1">
+                                          <EditableText
+                                            value={ms.label}
+                                            onChange={(val) => handleUpdateMilestone(task.id, i, { label: val })}
+                                            className="font-bold text-brand-400"
+                                          />
+                                          <button onClick={() => handleRemoveMilestone(task.id, i)} className="text-red-400 hover:bg-slate-700 rounded p-0.5" title="删除节点">
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                          </button>
+                                        </div>
+                                        <DateEditor
+                                          value={ms.date}
+                                          onChange={(val) => handleUpdateMilestone(task.id, i, { date: val })}
+                                          className="text-slate-300 font-mono text-[10px] bg-slate-900 px-1.5 py-0.5 rounded w-full text-center mt-1 outline outline-1 outline-slate-700"
+                                        />
+
+                                        <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-800 border-b border-l border-slate-600 rotate-45"></div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+
+
+                              </div>
+                            )}
+
+                            {!isVisible && (
+                              <div className="text-xs text-slate-500 italic pl-6 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                {eDate < dateStats.minDate ? "活动在往年结束" : "活动在未来年份"}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Scrubber Interaction Layer (Above Tasks) */}
+                  <div ref={timelineBodyRef} className="absolute top-0 bottom-0 left-[20rem] lg:left-[24rem] right-0 z-[45] pointer-events-none overflow-hidden">
+                    {scrubberPx !== null && (
+                      <div
+                        className={`absolute top-0 bottom-0 flex justify-center pointer-events-auto cursor-default touch-none group isolate ${isDraggingScrubber ? 'transition-none' : 'transition-transform'}`}
+                        style={{ width: '40px', transform: `translateX(calc(${scrubberPx}px - 20px))`, left: 0 }}
+                        onPointerDown={handleScrubberPointerDown}
+                      >
+                        {/* The actual 2px line */}
+                        <div className="w-[2px] h-full bg-blue-400 shadow-[0_0_15px_#60a5fa,0_0_3px_#60a5fa,inset_0_0_2px_#fff] pointer-events-none"></div>
+
+                        {/* Interactive Drag Handle */}
+                        <div
+                          className="absolute left-1/2 flex flex-col items-center justify-center z-50 pointer-events-none"
+                          style={{ top: typeof scrubberYPx === 'number' ? `${scrubberYPx}px` : '50%', transform: 'translate(-50%, -50%)' }}
+                        >
+                          <div className={`w-3 h-10 border-[2px] border-blue-400 rounded-full shadow-[0_0_20px_#60a5fa] transition-colors flex items-center justify-center ${isDraggingScrubber ? 'bg-blue-500' : 'bg-black group-hover:bg-slate-800'}`}>
+                            <div className="w-[1px] h-4 bg-blue-200/50"></div>
+                          </div>
+                          <div className={`bg-slate-900/95 backdrop-blur-md whitespace-nowrap text-[18px] font-black mt-2 px-4 py-2 rounded-lg shadow-[0_10px_20px_rgba(0,0,0,0.5)] border transition-colors cursor-default ${isDraggingScrubber ? 'border-blue-400 text-white shadow-[0_0_15px_#60a5fa]' : 'border-blue-500/30 text-blue-300'}`}>
+                            {scrubberTimeStr}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              </div>
+            </main>
+
+            {/* Footer Toolbar */}
+            <footer className="text-xs text-slate-400/80 flex justify-between shrink-0 font-medium">
+              <div className="flex gap-4">
+                <span>✨ 滚动或拖动右侧区域滑块以游览画卷</span>
+                <span>✨ 鼠标在此前项目的名称区域左侧会出现删除按钮</span>
+              </div>
+              <button onClick={() => { if (confirm("确认清空所有缓存历史吗？网页将会被重置！")) { window.localStorage.clear(); window.location.reload(); } }} className="text-red-400/80 hover:text-red-300 hover:underline">💣 恢复初始化</button>
+            </footer>
+
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+
+</html>
