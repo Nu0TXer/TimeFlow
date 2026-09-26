@@ -2,6 +2,8 @@
 
 一个高颜值、极客风的纯前端交互式甘特图与个人时间规划工具 (Interactive Timeline Planner)。无需复杂的后端配置，开箱即用，所有数据安全保存在本地。
 
+![TimeFlow Demo](./Demo.png)
+
 ## ✨ 核心特性 (Features)
 
 - **🚀 零构建 (Zero-Build)**：只需双击 `index.html` 即可在任何现代浏览器中运行，完全本地化。
