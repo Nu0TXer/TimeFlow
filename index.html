@@ -198,8 +198,11 @@
       { id: 'slate', val: 'bg-slate-900', label: '深空蓝' },
       { id: 'zinc', val: 'bg-zinc-900', label: '极简黑' },
       { id: 'blue', val: 'bg-blue-950', label: '海王星' },
+      { id: 'teal', val: 'bg-teal-950', label: '深海青' },
+      { id: 'sky', val: 'bg-sky-950', label: '天狼星' },
       { id: 'grad1', val: 'bg-gradient-to-br from-slate-900 to-emerald-900', label: '翡翠星云' },
       { id: 'grad2', val: 'bg-gradient-to-tr from-slate-900 via-purple-900 to-slate-900', label: '紫晶幻境' },
+      { id: 'grad3', val: 'bg-gradient-to-br from-indigo-950 to-cyan-900', label: '冰晶极光' },
     ];
 
     const THEMES = {
@@ -209,12 +212,19 @@
       'bg-orange-500': { border: 'border-orange-500', bg: 'bg-orange-900/40', fill: 'bg-orange-500/80', text: 'text-orange-200', accent: 'accent-orange-500' },
       'bg-pink-500': { border: 'border-pink-500', bg: 'bg-pink-900/40', fill: 'bg-pink-500/80', text: 'text-pink-200', accent: 'accent-pink-500' },
       'bg-cyan-500': { border: 'border-cyan-500', bg: 'bg-cyan-900/40', fill: 'bg-cyan-500/80', text: 'text-cyan-200', accent: 'accent-cyan-500' },
+      'bg-sky-400': { border: 'border-sky-400', bg: 'bg-sky-900/40', fill: 'bg-sky-400/80', text: 'text-sky-200', accent: 'accent-sky-400' },
+      'bg-lime-400': { border: 'border-lime-500', bg: 'bg-lime-900/40', fill: 'bg-lime-500/80', text: 'text-lime-200', accent: 'accent-lime-500' },
+      'bg-indigo-500': { border: 'border-indigo-500', bg: 'bg-indigo-900/40', fill: 'bg-indigo-500/80', text: 'text-indigo-200', accent: 'accent-indigo-500' },
+      'bg-rose-500': { border: 'border-rose-500', bg: 'bg-rose-900/40', fill: 'bg-rose-500/80', text: 'text-rose-200', accent: 'accent-rose-500' },
+      'bg-amber-500': { border: 'border-amber-500', bg: 'bg-amber-900/40', fill: 'bg-amber-500/80', text: 'text-amber-200', accent: 'accent-amber-500' },
+      'bg-teal-400': { border: 'border-teal-400', bg: 'bg-teal-900/40', fill: 'bg-teal-400/80', text: 'text-teal-200', accent: 'accent-teal-400' },
     };
 
     const App = () => {
       // States
       const [title, setTitle] = useLocalStorage("gantt-title", "TimeFlow");
       const [tasks, setTasks] = useLocalStorage("gantt-tasks", []);
+      const [activeColorPickerId, setActiveColorPickerId] = useState(null);
       const [showDetails, setShowDetails] = useLocalStorage("gantt-details", false);
       const [bgConfig, setBgConfig] = useLocalStorage("gantt-bg", { type: 'color', val: 'bg-slate-900' });
       const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
@@ -246,15 +256,14 @@
       const [isDraggingScrubber, setIsDraggingScrubber] = useState(false);
 
       const fitToScreen = () => {
-        const tasksInYear = tasks.filter(t => parseDate(t.endDate) >= dateStats.minDate && parseDate(t.startDate) <= dateStats.maxDate);
         if (!scrollContainerRef.current) return;
 
         let earliest;
         let newZoom = 35;
 
-        if (tasksInYear.length > 0) {
-          earliest = Math.min(...tasksInYear.map(t => parseDate(t.startDate).getTime()));
-          let latest = Math.max(...tasksInYear.map(t => parseDate(t.endDate).getTime()));
+        if (tasks.length > 0) {
+          earliest = Math.min(...tasks.map(t => parseDate(t.startDate).getTime()));
+          let latest = Math.max(...tasks.map(t => parseDate(t.endDate).getTime()));
           earliest = Math.max(earliest, dateStats.minDate.getTime());
           latest = Math.min(latest, dateStats.maxDate.getTime());
 
@@ -282,34 +291,42 @@
         hasInitialScrolled.current = false;
       }, [viewYear]);
 
-      // Boundaries Math (Fixed to View Year)
+      // Boundaries Math (Calculated dynamically to span all tasks + current year)
       const dateStats = useMemo(() => {
-        const minDate = new Date(viewYear, 0, 1);
-        const maxDate = new Date(viewYear, 11, 31, 23, 59, 59, 999);
+        let minYear = new Date().getFullYear() - 1; // buffer a bit of past
+        let maxYear = new Date().getFullYear();
+
+        if (tasks && tasks.length > 0) {
+          const startYears = tasks.map(t => parseDate(t.startDate).getFullYear());
+          const endYears = tasks.map(t => parseDate(t.endDate).getFullYear());
+          minYear = Math.min(new Date().getFullYear(), ...startYears);
+          maxYear = Math.max(new Date().getFullYear(), ...endYears);
+        }
+
+        const minDate = new Date(minYear, 0, 1);
+        const maxDate = new Date(maxYear, 11, 31, 23, 59, 59, 999);
         const totalDurationDays = Math.ceil((maxDate.getTime() - minDate.getTime()) / MS_PER_DAY);
 
-        return {
-          minDate,
-          maxDate,
-          totalDurationDays,
-        };
-      }, [viewYear]);
+        return { minDate, maxDate, totalDurationDays, minYear, maxYear };
+      }, [tasks]);
 
       const months = useMemo(() => {
         const result = [];
-        for (let m = 0; m < 12; m++) {
-          const monthStart = new Date(viewYear, m, 1);
-          const monthEnd = new Date(viewYear, m + 1, 0, 23, 59, 59, 999);
-          const name = monthStart.toLocaleString('zh-CN', { month: 'long', year: 'numeric' });
-          const daysInSpan = Math.ceil((monthEnd.getTime() - monthStart.getTime()) / MS_PER_DAY);
-          result.push({
-            name,
-            days: daysInSpan,
-            widthPx: daysInSpan * pixelsPerDay
-          });
+        for (let y = dateStats.minYear; y <= dateStats.maxYear; y++) {
+          for (let m = 0; m < 12; m++) {
+            const monthStart = new Date(y, m, 1);
+            const monthEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
+            const name = monthStart.toLocaleString('zh-CN', { month: 'long', year: 'numeric' });
+            const daysInSpan = Math.ceil((monthEnd.getTime() - monthStart.getTime()) / MS_PER_DAY);
+            result.push({
+              name,
+              days: daysInSpan,
+              widthPx: daysInSpan * pixelsPerDay
+            });
+          }
         }
         return result;
-      }, [viewYear, pixelsPerDay]);
+      }, [dateStats, pixelsPerDay]);
 
       const todayOffsetPx = useMemo(() => {
         const time = today.getTime();
@@ -386,9 +403,8 @@
 
         const container = scrollContainerRef.current;
         const autoScroll = () => {
-          const tasksInYear = tasks.filter(t => parseDate(t.endDate) >= dateStats.minDate && parseDate(t.startDate) <= dateStats.maxDate);
-          if (tasksInYear.length > 0) {
-            let earliest = Math.min(...tasksInYear.map(t => parseDate(t.startDate).getTime()));
+          if (tasks.length > 0) {
+            let earliest = Math.min(...tasks.map(t => parseDate(t.startDate).getTime()));
             earliest = Math.max(earliest, dateStats.minDate.getTime());
             const left = ((earliest - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay;
             container.scrollLeft = Math.max(0, left - 20);
@@ -405,7 +421,18 @@
         }, 150);
 
         return () => clearTimeout(timer);
-      }, [viewYear, todayOffsetPx, dateStats.minDate, tasks]);
+      }, [dateStats.minDate, tasks, pixelsPerDay, todayOffsetPx]);
+
+      // Jump to Year Logic
+      useEffect(() => {
+        if (hasInitialScrolled.current && scrollContainerRef.current) {
+          const targetYStart = new Date(viewYear, 0, 1).getTime();
+          if (targetYStart >= dateStats.minDate.getTime() && targetYStart <= dateStats.maxDate.getTime()) {
+             const left = Math.max(0, ((targetYStart - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay);
+             scrollContainerRef.current.scrollTo({ left, behavior: 'smooth' });
+          }
+        }
+      }, [viewYear, dateStats, pixelsPerDay]);
 
       // Handlers
       const handleUpdateTask = (id, updates) => {
@@ -428,8 +455,8 @@
         const d1 = new Date();
         const d2 = new Date(d1.getTime() + 7 * MS_PER_DAY);
 
-        const icons = ['✨', '🚀', '🎯', '💡', '📅', '📝', '🔥', '📌'];
-        const colors = ['bg-blue-500', 'bg-purple-500', 'bg-emerald-500', 'bg-orange-500', 'bg-pink-500', 'bg-cyan-500'];
+        const icons = ['✨', '🚀', '🎯', '💡', '📅', '📝', '🔥', '📌', '⚡', '🏆', '🎨', '💻', '🔮', '🔨'];
+        const colors = Object.keys(THEMES);
 
         setTasks([...tasks, {
           id: Date.now(),
@@ -470,7 +497,7 @@
       // Inline Custom Styles
       const mainContainerStyle = bgConfig.type === 'image'
         ? { backgroundImage: `url('${bgConfig.val}')`, backgroundSize: 'cover', backgroundPosition: 'center' }
-        : {};
+        : bgConfig.type === 'customColor' ? { backgroundColor: bgConfig.val } : {};
       const baseClasses = bgConfig.type === 'color' ? bgConfig.val : 'bg-slate-900';
 
       return (
@@ -509,7 +536,7 @@
                   <div className="flex flex-col max-w-[200px] overflow-hidden pr-2">
                     <span className="text-[9px] text-emerald-400/80 font-bold uppercase tracking-widest pt-0.5">聚焦 (FOCUS)</span>
                     <span className="truncate text-[13px] font-bold text-white mt-1">
-                      {topPriorityTask ? topPriorityTask.name : "暂无待办事项"}
+                      {topPriorityTask ? topPriorityTask.title : "暂无待办事项"}
                     </span>
                   </div>
                 </div>
@@ -532,6 +559,23 @@
                           ></div>
                         ))}
                       </div>
+                      <div className="text-xs font-semibold text-slate-400 mb-2 flex items-center justify-between">
+                        <span>自定义颜色</span>
+                        <div className="relative overflow-hidden rounded cursor-pointer group flex items-center">
+                          <input 
+                            type="color" 
+                            className="absolute inset-0 w-[200%] h-[200%] -top-1/2 -left-1/2 cursor-pointer opacity-0 z-10" 
+                            onChange={(e) => { setBgConfig({ type: 'customColor', val: e.target.value }); }}
+                            value={bgConfig.type === 'customColor' ? bgConfig.val : '#0f172a'}
+                            title="打开系统取色器"
+                          />
+                          <div className="bg-brand-500 group-hover:bg-brand-400 text-white text-[10px] px-2 py-1 rounded flex items-center gap-1 transition-colors">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01" /></svg>
+                            取色器
+                          </div>
+                        </div>
+                      </div>
+                      <div className="w-full h-px bg-slate-700 my-3"></div>
                       <div className="text-xs font-semibold text-slate-400 mb-2">外链图 URL</div>
                       <div className="flex gap-2">
                         <input
@@ -576,13 +620,13 @@
                   <span>添加新活动</span>
                 </button>
 
-                {/* Year Selector */}
+                {/* Year Navigator (Jumps to Year) */}
                 <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg shadow-lg overflow-hidden h-[42px]">
-                  <button onClick={() => setViewYear(y => y - 1)} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="上一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
+                  <button onClick={() => setViewYear(y => Math.max(dateStats.minYear, y - 1))} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="滚动到上一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg></button>
                   <div className="flex items-center justify-center px-1">
                     <span className="text-brand-400 font-bold whitespace-nowrap">{viewYear} 年</span>
                   </div>
-                  <button onClick={() => setViewYear(y => y + 1)} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="下一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
+                  <button onClick={() => setViewYear(y => Math.min(dateStats.maxYear, y + 1))} className="px-3 h-full hover:bg-slate-700 hover:text-white text-slate-300 transition-colors flex items-center" title="滚动到下一年"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>
                 </div>
 
                 {/* Clock */}
@@ -612,7 +656,7 @@
             <main ref={scrollContainerRef} className="flex-1 min-h-0 mt-1 rounded-xl border border-indigo-500/20 shadow-[0_20px_50px_rgba(0,0,0,0.8),inset_0_0_30px_rgba(0,0,0,0.5)] overflow-auto custom-scrollbar relative bg-slate-950/20 backdrop-blur-sm">
 
               {/* Entire virtual table width */}
-              <div className="min-w-max min-h-full flex flex-col relative pb-32">
+              <div className="min-w-max min-h-[min-content] flex flex-col relative pb-4">
 
                 {/* Timeline Header (Sticky Top) */}
                 <div className="flex sticky top-0 z-50 bg-slate-950/40 backdrop-blur-md border-b border-indigo-500/20 shadow-[0_10px_20px_rgba(0,0,0,0.6)]">
@@ -685,20 +729,20 @@
                       const sDate = parseDate(task.startDate);
                       const eDate = parseDate(task.endDate);
 
-                      const isVisible = eDate >= dateStats.minDate && sDate <= dateStats.maxDate;
+                      // Date boundaries logic - no longer restricting to a single year!
                       const visualStart = new Date(Math.max(sDate.getTime(), dateStats.minDate.getTime()));
                       const visualEnd = new Date(Math.min(eDate.getTime(), dateStats.maxDate.getTime()));
 
                       const leftPx = ((visualStart.getTime() - dateStats.minDate.getTime()) / MS_PER_DAY) * pixelsPerDay;
                       let widthPx = ((visualEnd.getTime() - visualStart.getTime()) / MS_PER_DAY) * pixelsPerDay;
-                      if (widthPx < 20 && isVisible) widthPx = 20;
+                      if (widthPx < 20) widthPx = 20;
 
                       const tColor = THEMES[task.color] || THEMES['bg-blue-500'];
 
                       return (
                         <div key={task.id} className={`flex group transition-colors border-b border-indigo-500/10 last:border-0 relative min-h-[58px] ${task.isCompleted ? 'bg-slate-900/50' : 'hover:bg-indigo-500/5'}`}>
                           {/* Sticky Y-Axis Item */}
-                          <div className={`w-[20rem] lg:w-[24rem] shrink-0 border-r border-indigo-500/20 p-2 lg:p-3 flex items-center gap-3 sticky left-0 z-40 transition-colors shadow-[4px_0_15px_rgba(0,0,0,0.1)] backdrop-blur-md ${task.isCompleted ? 'bg-slate-950/40 grayscale opacity-80' : 'bg-slate-950/30 group-hover:bg-indigo-950/40'}`}>
+                          <div className={`w-[20rem] lg:w-[24rem] shrink-0 border-r border-indigo-500/20 p-2 lg:p-3 flex items-center gap-3 sticky left-0 transition-colors shadow-[4px_0_15px_rgba(0,0,0,0.1)] backdrop-blur-md ${task.isCompleted ? 'bg-slate-950/40 grayscale opacity-80' : 'bg-slate-950/30 group-hover:bg-indigo-950/40'} ${activeColorPickerId === task.id ? 'z-[60]' : 'z-40'}`}>
                             {/* Delete Button */}
                             <button
                               onClick={() => handleDeleteTask(task.id)}
@@ -716,22 +760,57 @@
                               {task.isCompleted && <svg className="w-4 h-4 text-white drop-shadow-md" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
                             </button>
 
-                            <div className={`text-xl lg:text-2xl w-10 h-10 rounded-xl flex items-center justify-center shadow-inner group-hover:scale-110 transition-transform shrink-0 ${task.isCompleted ? 'bg-slate-800' : 'bg-indigo-950 border border-indigo-500/30'}`}>
+                            <div 
+                              className={`relative text-xl lg:text-2xl w-10 h-10 rounded-xl flex items-center justify-center shadow-inner transition-transform shrink-0 cursor-pointer hover:bg-slate-700 ${task.isCompleted ? 'bg-slate-800' : 'bg-indigo-950 border border-indigo-500/30'} ${activeColorPickerId === task.id ? 'z-50 scale-110' : 'group-hover:scale-110'}`}
+                              onClick={() => setActiveColorPickerId(activeColorPickerId === task.id ? null : task.id)}
+                              title="点击修改颜色和图标"
+                            >
                               {task.icon}
+                              {activeColorPickerId === task.id && (
+                                <div className="absolute top-12 left-0 p-3 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl z-[100] w-[180px] cursor-default flex flex-col gap-3" onClick={e => e.stopPropagation()}>
+                                  <div>
+                                    <div className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-widest leading-none">更换颜色</div>
+                                    <div className="flex flex-wrap gap-2">
+                                      {Object.keys(THEMES).map(cKey => (
+                                        <div 
+                                          key={cKey} 
+                                          onClick={() => { handleUpdateTask(task.id, { color: cKey }); setActiveColorPickerId(null); }} 
+                                          className={`w-5 h-5 rounded-full cursor-pointer hover:scale-110 transition-transform box-content border-2 ${task.color === cKey ? 'border-white shadow-[0_0_8px_white]' : 'border-transparent'} ${THEMES[cKey].fill}`}
+                                        ></div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div className="w-full h-px bg-slate-700"></div>
+                                  <div>
+                                    <div className="text-[10px] text-slate-400 font-bold mb-2 uppercase tracking-widest leading-none">更换图标</div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {['✨', '🚀', '🎯', '💡', '📅', '📝', '🔥', '📌', '⚡', '🏆', '🎨', '💻', '🔮', '🔨'].map(icon => (
+                                        <div 
+                                          key={icon} 
+                                          onClick={() => { handleUpdateTask(task.id, { icon }); setActiveColorPickerId(null); }} 
+                                          className={`text-base cursor-pointer hover:bg-slate-600/50 w-7 h-7 flex items-center justify-center rounded transition-colors ${task.icon === icon ? 'bg-slate-600 shadow-inner' : ''}`}
+                                        >{icon}</div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                             <div className="flex flex-col flex-1 min-w-0 pr-1">
                               <EditableText
                                 value={task.title}
                                 onChange={(newVal) => handleUpdateTask(task.id, { title: newVal })}
-                                className={`font-bold text-[15px] truncate block mb-1 ${task.isCompleted ? 'text-slate-500 line-through' : 'text-indigo-100 drop-shadow-[0_0_5px_rgba(199,210,254,0.5)]'}`}
+                                className={`font-bold break-words ${task.title.length < 10 ? 'text-[15px]' : task.title.length < 20 ? 'text-[13px] leading-tight' : 'text-[11px] leading-snug'} block mb-0.5 ${task.isCompleted ? 'text-slate-500 line-through' : 'text-indigo-100 drop-shadow-[0_0_5px_rgba(199,210,254,0.5)]'}`}
                               />
+                              
+                              <div className="flex items-center text-[10px] text-slate-400 gap-1 font-mono shrink-0 flex-wrap">
+                                <DateEditor value={task.startDate} onChange={(val) => handleUpdateTask(task.id, { startDate: val })} className={!showDetails ? "bg-transparent border-none !text-slate-500 px-0 hover:bg-slate-800" : ""} />
+                                <span>~</span>
+                                <DateEditor value={task.endDate} onChange={(val) => handleUpdateTask(task.id, { endDate: val })} className={!showDetails ? "bg-transparent border-none !text-slate-500 px-0 hover:bg-slate-800" : ""} />
+                              </div>
+
                               {showDetails && (
                                 <div className="flex flex-col gap-1 w-full shrink-0 mt-1">
-                                  <div className="flex items-center text-xs text-slate-400 gap-1 font-mono shrink-0 flex-wrap">
-                                    <DateEditor value={task.startDate} onChange={(val) => handleUpdateTask(task.id, { startDate: val })} />
-                                    <span>~</span>
-                                    <DateEditor value={task.endDate} onChange={(val) => handleUpdateTask(task.id, { endDate: val })} />
-                                  </div>
                                   <div className="flex items-center gap-2 mt-1 bg-slate-800/40 p-1.5 rounded-[8px] border border-slate-700/50 shadow-inner">
                                     <span className="text-[11px] font-bold text-slate-400 shrink-0 tracking-wide">进度</span>
                                     <input
@@ -743,6 +822,10 @@
                                     />
                                     <span className="text-[11px] font-mono font-bold text-slate-300 w-8 text-right shrink-0">{task.progress || 0}%</span>
                                   </div>
+                                  <button onClick={() => handleAddMilestone(task.id)} className="text-[10px] bg-slate-800/80 hover:bg-slate-700 text-slate-300 py-1 rounded-md border border-slate-700 mt-0.5 flex items-center justify-center gap-1 transition-colors">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                                    添加节点 (Milestone)
+                                  </button>
                                 </div>
                               )}
                             </div>
@@ -751,8 +834,7 @@
                           {/* Gantt Bar Area */}
                           <div className="relative flex-1 py-4 flex items-center">
                             {/* The Bar */}
-                            {isVisible && (
-                              <div
+                            <div
                                 className={`absolute top-1/2 -translate-y-1/2 h-[50px] rounded-lg border-2 ${task.isCompleted ? 'border-slate-700/50 grayscale opacity-40' : tColor.border} outline-none transition-all group/bar hover:brightness-110 cursor-pointer shadow-[0_0_15px_rgba(0,0,0,0.5)] z-20`}
                                 style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
                               >
@@ -814,18 +896,9 @@
                                   );
                                 })}
 
-
                               </div>
-                            )}
-
-                            {!isVisible && (
-                              <div className="text-xs text-slate-500 italic pl-6 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-2">
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                                {eDate < dateStats.minDate ? "活动在往年结束" : "活动在未来年份"}
-                              </div>
-                            )}
+                            </div>
                           </div>
-                        </div>
                       );
                     })}
                   </div>
